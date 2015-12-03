@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 
 try:
     import http.client as httplib
@@ -7,12 +9,9 @@ except ImportError:
     import httplib
     from urllib import urlencode
 
-import json
-import re
 import socket
 
-from itertools import groupby
-from operator import itemgetter
+from sets import Set
 
 from .exceptions import (
     NERError,
@@ -24,80 +23,39 @@ from .utils import (
 )
 
 
-#regex patterns for various tagging options for entity parsing
-SLASHTAGS_EPATTERN  = re.compile(r'(.+?)/([A-Z]+)?\s*')
-XML_EPATTERN        = re.compile(r'<wi num=".+?" entity="(.+?)">(.+?)</wi>')
-INLINEXML_EPATTERN  = re.compile(r'<([A-Z]+?)>(.+?)</\1>')
-
-
 class NER(object):
     """Wrapper for server-based Stanford NER tagger."""
 
     def tag_text(self, text):
         pass
 
-    def __slashTags_parse_entities(self, tagged_text):
-        """Return a list of token tuples (entity_type, token) parsed
-        from slashTags-format tagged text.
-
-        :param tagged_text: slashTag-format entity tagged text
-        """
-        return (match.groups()[::-1] for match in
-            SLASHTAGS_EPATTERN.finditer(tagged_text))
-
-    def __xml_parse_entities(self, tagged_text):
-        """Return a list of token tuples (entity_type, token) parsed
-        from xml-format tagged text.
-
-        :param tagged_text: xml-format entity tagged text
-        """
-        return (match.groups() for match in
-            XML_EPATTERN.finditer(tagged_text))
-
-    def __inlineXML_parse_entities(self, tagged_text):
-        """Return a list of entity tuples (entity_type, entity) parsed
-        from inlineXML-format tagged text.
-
-        :param tagged_text: inlineXML-format tagged text
-        """
-        return (match.groups() for match in
-            INLINEXML_EPATTERN.finditer(tagged_text))
-
-    def __collapse_to_dict(self, pairs):
-        """Return a dictionary mapping the first value of every pair
-        to a collapsed list of all the second values of every pair.
-
-        :param pairs: list of (entity_type, token) tuples
-        """
-        return dict((first, list(map(itemgetter(1), second))) for (first, second)
-            in groupby(sorted(pairs, key=itemgetter(0)), key=itemgetter(0)))
+    def get_tagged_text(self, text):
+        return self.tag_text(text)
 
     def get_entities(self, text):
-        """Return all the named entities in text as a dict.
+        """
 
-        :param text: string to parse entities
-        :returns: a dict of entity type to list of entities of that type
         """
         tagged_text = self.tag_text(text)
-        if self.oformat == 'slashTags':
-            entities = self.__slashTags_parse_entities(tagged_text)
-            entities = ((etype, " ".join(t[1] for t in tokens)) for (etype, tokens) in
-                groupby(entities, key=itemgetter(0)))
-        elif self.oformat == 'xml':
-            entities = self.__xml_parse_entities(tagged_text)
-            entities = ((etype, " ".join(t[1] for t in tokens)) for (etype, tokens) in
-                groupby(entities, key=itemgetter(0)))
-        else: #inlineXML
-            entities = self.__inlineXML_parse_entities(tagged_text)
-        return self.__collapse_to_dict(entities)
+        result = {
+            'PERS': [],
+            'LOC': [],
+            'ORG': []
+        }
+        for word in tagged_text.split():
+            spilited = word.split('/')
+            tag = spilited[-1]
+            if tag != u'O':
+                tag_base, tag_type = tag.split('-')
+                text = "/".join(spilited[:-1])
+                if tag_base == 'B':
+                    result[tag_type].append(text)
+                if tag_base == 'I':
+                    result[tag_type][-1] += ' %s' % text
+        for k in result:
+            result[k] = list(Set(result[k]))
 
-    def json_entities(self, text):
-        """Return a JSON encoding of named entities in text.
-
-        :param text: string to parse entities
-        :returns: a JSON dump of entities parsed from text
-        """
-        return json.dumps(self.get_entities(text))
+        return result
 
 
 class SocketNER(NER):
